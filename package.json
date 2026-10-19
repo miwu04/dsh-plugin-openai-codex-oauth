@@ -1,0 +1,36 @@
+{
+  "name": "dsh-plugin-openai-codex-oauth",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Interactive OpenAI Codex OAuth login flow for DeepSeek Harness",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "test": "node test.mjs && node test-client.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "plugin": {
+      "id": "openai-codex-oauth",
+      "name": "OpenAI Codex OAuth login helper"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-authorization": "0.2.1-rc.2",
+    "@earendil-works/pi-ai": "^1.1.0"
+  }
+}
