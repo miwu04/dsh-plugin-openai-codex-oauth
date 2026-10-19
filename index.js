@@ -195,7 +195,8 @@ export class OpenAICodexOAuthPlugin extends Service {
     const { providerId, recordScope } = this.config;
     const key = credentialKey(recordScope, providerId);
     if (this.activeAttempt !== undefined) {
-      yield { type: "error", message: "Another ChatGPT sign-in is already in progress." };
+      // The client localizes by code; message stays as a human-readable detail.
+      yield { type: "error", code: "busy", message: "Another ChatGPT sign-in is already in progress." };
       return;
     }
 
@@ -267,7 +268,7 @@ export class OpenAICodexOAuthPlugin extends Service {
         const outcome = await authorization.begin({ key, method: "oauth", signal: local.signal, interaction });
         publish({ type: "result", status: outcome.status });
       } catch (error) {
-        publish({ type: "error", message: error instanceof Error ? error.message : "The ChatGPT sign-in failed." });
+        publish({ type: "error", code: "failed", message: error instanceof Error ? error.message : "The ChatGPT sign-in failed." });
       } finally {
         closed = true;
         settleWaiters(local.signal.reason instanceof Error ? local.signal.reason : new Error("The sign-in attempt ended."));

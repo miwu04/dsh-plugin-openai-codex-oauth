@@ -50,13 +50,24 @@ const remote = {
     return async () => {};
   },
 };
+let registeredCopy;
 const ctx = {
   get: (key) => (key === "remote.openaiCodexOAuth" ? namespace : undefined),
   effect: (fn) => void fn(),
   locale: {
     register: (namespace, dictionary) => {
       assert.equal(namespace, "openai-codex-oauth");
-      assert.ok(dictionary.en?.button && dictionary.zh?.button);
+      registeredCopy = dictionary;
+      // The locale runtime rejects a registration missing a shipped locale or
+      // a key; assert the same balance here so edits cannot drift.
+      const en = Object.keys(dictionary.en).sort();
+      const zh = Object.keys(dictionary.zh).sort();
+      assert.deepEqual(en, zh, "en and zh dictionaries must share one key set");
+      assert.ok(en.includes("button.signIn") && en.includes("button.title"), "core labels are present");
+      for (const key of en) {
+        assert.ok(dictionary.en[key].trim().length > 0, "empty en translation: " + key);
+        assert.ok(dictionary.zh[key].trim().length > 0, "empty zh translation: " + key);
+      }
     },
   },
   slots: {
@@ -79,6 +90,15 @@ assert.equal(footer.descriptor.key, "llm-pi-ai");
 assert.equal(footer.descriptor.locale, "openai-codex-oauth");
 assert.equal(typeof footer.descriptor.inject, "function");
 assert.equal(typeof footer.component, "function");
+
+// Every key the bundle translates must exist in both registered dictionaries.
+const used = [...source.matchAll(/\bt\("([^"]+)"/g)].map((match) => match[1]);
+assert.ok(used.length > 0, "the bundle must translate through t()");
+for (const key of new Set(used)) {
+  assert.ok(Object.hasOwn(registeredCopy.en, key), "missing en translation for " + key);
+  assert.ok(Object.hasOwn(registeredCopy.zh, key), "missing zh translation for " + key);
+}
+assert.ok(!/\bt\("(short|button|open|close|cancel|continue|choose)"/.test(source), "no legacy bare keys");
 
 // The control exists only for a configured openai-codex row.
 const t = (key) => key;

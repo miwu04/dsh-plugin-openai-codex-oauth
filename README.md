@@ -57,6 +57,25 @@ leave its service key held by the dead fiber.
 A plugin is trusted, unsandboxed Host code: it can read DSH credentials and
 reach the network. Review the source before enabling it.
 
+## Localization
+
+All UI copy lives in one `openai-codex-oauth` namespace with complete `en` and
+`zh` dictionaries and dotted keys (`button.title`, `notice.deviceCode`,
+`error.busy`). The locale runtime rejects a registration that misses a shipped
+locale or a key, and `test-client.mjs` additionally checks that every key the
+bundle passes to `t()` exists in both dictionaries.
+
+Host error frames carry a stable `code` (`busy`, `failed`), so the dialog
+localizes them and shows the raw Host message only under **Details**. Device
+codes are rendered from the `{code}` placeholder, so the notice text follows
+the active locale even though the Host flow is English.
+
+The Host flow also asks fixed English questions. Those whose answer shape is
+known are localized in the client: the login-method select (option ids
+`browser` and `device_code`) and the pasted-redirect-URL prompt. An
+unrecognized question keeps the Host's own wording, so a future flow change
+degrades to English instead of showing a wrong label.
+
 ## Using the button
 
 1. Open **Settings → Models**.

@@ -10,32 +10,57 @@ window.__ModuleLoader__.load({
 
 		const NS = "openai-codex-oauth";
 		const PACKAGE = "dsh-plugin-openai-codex-oauth";
+
+		// Both built-in locales carry the same key set; the locale runtime
+		// rejects a registration that misses one. Placeholders use {name}.
 		const copy = {
 			en: {
-				short: "ChatGPT sign-in",
-				button: "Sign in with ChatGPT",
-				working: "Waiting for ChatGPT sign-in…",
-				open: "Open sign-in page",
-				close: "Close",
-				cancel: "Cancel",
-				failed: "Sign-in failed. Check the DSH host logs and try again.",
-				choose: "Choose an option",
-				continue: "Continue",
-				cancelled: "Sign-in was cancelled.",
-				success: "ChatGPT account connected."
+				"button.signIn": "ChatGPT sign-in",
+				"button.title": "Sign in with ChatGPT",
+				"action.open": "Open sign-in page",
+				"action.close": "Close",
+				"action.cancel": "Cancel",
+				"action.continue": "Continue",
+				"prompt.choose": "Choose an option",
+				"prompt.method": "Select sign-in method",
+				"prompt.method.browser": "Browser login",
+				"prompt.method.deviceCode": "Device code login",
+				"prompt.redirectUrl": "Complete sign-in in your browser, or paste the final redirect URL here:",
+				"notice.waiting": "Waiting for ChatGPT sign-in…",
+				"notice.deviceCode": "Enter this code on the verification page: {code}",
+				"notice.browser": "Complete sign-in in the browser window that opened.",
+				"result.success": "ChatGPT account connected.",
+				"result.cancelled": "Sign-in was cancelled.",
+				"error.failed": "Sign-in failed. Check the DSH host logs and try again.",
+				"error.busy": "Another ChatGPT sign-in is already in progress.",
+				"error.namespace": "The sign-in service did not start. Reload the page and try again.",
+				"error.unavailable": "The sign-in service is unavailable on this host.",
+				"error.cancelled": "The sign-in was cancelled before it finished.",
+				"error.detail": "Details"
 			},
 			zh: {
-				short: "ChatGPT 登录",
-				button: "使用 ChatGPT 登录",
-				working: "正在等待 ChatGPT 登录…",
-				open: "打开登录页面",
-				close: "关闭",
-				cancel: "取消",
-				failed: "登录失败。请检查 DSH Host 日志后重试。",
-				choose: "请选择",
-				continue: "继续",
-				cancelled: "登录已取消。",
-				success: "ChatGPT 账号已连接。"
+				"button.signIn": "ChatGPT 登录",
+				"button.title": "使用 ChatGPT 登录",
+				"action.open": "打开登录页面",
+				"action.close": "关闭",
+				"action.cancel": "取消",
+				"action.continue": "继续",
+				"prompt.choose": "请选择",
+				"prompt.method": "选择登录方式",
+				"prompt.method.browser": "浏览器登录",
+				"prompt.method.deviceCode": "设备码登录",
+				"prompt.redirectUrl": "请在浏览器中完成登录，或在此粘贴最终的跳转 URL：",
+				"notice.waiting": "正在等待 ChatGPT 登录…",
+				"notice.deviceCode": "请在验证页面输入此代码：{code}",
+				"notice.browser": "请在打开的浏览器窗口中完成登录。",
+				"result.success": "ChatGPT 账号已连接。",
+				"result.cancelled": "登录已取消。",
+				"error.failed": "登录失败。请检查 DSH Host 日志后重试。",
+				"error.busy": "已有一个 ChatGPT 登录正在进行中。",
+				"error.namespace": "登录服务未能启动。请刷新页面后重试。",
+				"error.unavailable": "当前 Host 上登录服务不可用。",
+				"error.cancelled": "登录在完成前已被取消。",
+				"error.detail": "详情"
 			}
 		};
 
@@ -72,6 +97,55 @@ window.__ModuleLoader__.load({
 		const safeUrl = (value) => (typeof value === "string" && /^https:\/\//i.test(value) ? value : undefined);
 		const text = (value, fallback) => (typeof value === "string" && value.trim().length > 0 ? value : fallback);
 
+		/** Stable failure codes the dialog localizes; anything else is a detail. */
+		const errorKey = (code) =>
+			code === "busy"
+				? "error.busy"
+				: code === "namespace"
+					? "error.namespace"
+					: code === "unavailable"
+						? "error.unavailable"
+						: code === "cancelled"
+							? "error.cancelled"
+							: "error.failed";
+
+		// pi-ai's Codex flow asks fixed English questions. Match the ones whose
+		// answer shape is known so the dialog can stay in the active locale;
+		// anything unrecognized keeps the Host's own wording.
+		const KNOWN_PROMPTS = {
+			"Complete login in your browser, or paste the final redirect URL here:": "prompt.redirectUrl"
+		};
+		const promptLabel = (t, prompt) => {
+			const question = prompt?.prompt;
+			const options = Array.isArray(question?.options) ? question.options : [];
+			if (question?.kind === "select" && options.some((option) => option.id === "device_code")) {
+				return t("prompt.method");
+			}
+			if (typeof question?.message === "string" && Object.hasOwn(KNOWN_PROMPTS, question.message)) {
+				return t(KNOWN_PROMPTS[question.message]);
+			}
+			return text(question?.message, t("action.continue"));
+		};
+		const optionLabel = (t, option) =>
+			option.id === "browser"
+				? t("prompt.method.browser")
+				: option.id === "device_code"
+					? t("prompt.method.deviceCode")
+					: option.label;
+
+		/** Map a thrown value onto a localization code, keeping its message as detail. */
+		const failureOf = (error) => ({
+			code:
+				error !== null && typeof error === "object" && typeof error.code === "string"
+					? error.code === "gateway/invocation-unavailable" || error.code === "gateway/service-unavailable"
+						? "unavailable"
+						: error.code === "gateway/cancelled"
+							? "cancelled"
+							: error.code
+					: "failed",
+			detail: error instanceof Error ? error.message : String(error)
+		});
+
 		/**
 		 * The control belongs to one provider card. It sits immediately left of
 		 * that card's own Edit button and uses the page's Button primitive with
@@ -95,7 +169,6 @@ window.__ModuleLoader__.load({
 			// from a ref callback re-runs every render and loops.
 			const measure = (element) => {
 				if (element === null || element === undefined) return;
-				// Walk out to the provider card: the slot may wrap the component.
 				let card = element.parentElement;
 				while (card !== null && card !== undefined && !/rowCard/.test(String(card.className ?? ""))) {
 					card = card.parentElement;
@@ -131,6 +204,8 @@ window.__ModuleLoader__.load({
 				}
 			};
 
+			const fail = (failure) => setState({ phase: "failed", code: failure.code, detail: failure.detail });
+
 			const start = async () => {
 				const controller = new AbortController();
 				abortRef.current = controller;
@@ -141,7 +216,7 @@ window.__ModuleLoader__.load({
 				} catch (error) {
 					abortRef.current = undefined;
 					console.error("[openai-codex-oauth] opening the sign-in stream failed", error);
-					setState({ phase: "failed", message: error instanceof Error ? error.message : String(error) });
+					fail(failureOf(error));
 					return;
 				}
 				handleRef.current = handle;
@@ -159,14 +234,14 @@ window.__ModuleLoader__.load({
 						} else if (frame.type === "error") {
 							handleRef.current = undefined;
 							abortRef.current = undefined;
-							setState({ phase: "failed", message: frame.message });
+							fail({ code: frame.code ?? "failed", detail: frame.message });
 						}
 					}
 				} catch (error) {
 					console.error("[openai-codex-oauth] the sign-in stream failed", error);
 					handleRef.current = undefined;
 					abortRef.current = undefined;
-					setState({ phase: "failed", message: error instanceof Error ? error.message : String(error) });
+					fail(failureOf(error));
 				}
 			};
 
@@ -178,7 +253,7 @@ window.__ModuleLoader__.load({
 					handle.send({ type: "answer", id: prompt.id, value: state.answer });
 				} catch (error) {
 					console.error("[openai-codex-oauth] answering the prompt failed", error);
-					setState({ phase: "failed", message: error instanceof Error ? error.message : String(error) });
+					fail(failureOf(error));
 					return;
 				}
 				setState((current) => ({ ...current, prompt: undefined, answer: "" }));
@@ -201,27 +276,48 @@ window.__ModuleLoader__.load({
 			const url = state.phase === "working" ? safeUrl(notice?.url) : undefined;
 			const options = Array.isArray(prompt?.prompt?.options) ? prompt.prompt.options : [];
 			const selecting = prompt?.prompt?.kind === "select" && options.length > 0;
+
 			const noticeText =
 				state.phase === "failed"
-					? t("failed")
+					? t(errorKey(state.code))
 					: state.phase === "done"
 						? state.status === "authorized"
-							? t("success")
-							: t("cancelled")
-						: notice?.code
-							? [text(notice?.message, ""), String(notice.code)].filter(Boolean).join(" ")
-							: text(notice?.message, t("working"));
+							? t("result.success")
+							: t("result.cancelled")
+						: notice?.code !== undefined
+							? t("notice.deviceCode", { code: String(notice.code) })
+							: url !== undefined
+								? t("notice.browser")
+								: t("notice.waiting");
+
+			const detail =
+				state.phase === "failed" && typeof state.detail === "string" && state.detail.length > 0 && state.detail !== noticeText
+					? state.detail
+					: undefined;
 
 			const working = state.phase === "working";
 			const closable = !working;
-			const footer = working || prompt !== undefined
-				? [
-						h(Button, { key: "cancel", variant: "outline", size: "sm", onClick: cancel }, t("cancel")),
-						...(prompt === undefined
-							? []
-							: [h(Button, { key: "continue", variant: "outline", size: "sm", disabled: (state.answer ?? "").length === 0, onClick: submit }, t("continue"))])
-					]
-				: [h(Button, { key: "close", variant: "outline", size: "sm", onClick: finish }, t("close"))];
+			const footer =
+				working || prompt !== undefined
+					? [
+							h(Button, { key: "cancel", variant: "outline", size: "sm", onClick: cancel }, t("action.cancel")),
+							...(prompt === undefined
+								? []
+								: [
+										h(
+											Button,
+											{
+												key: "continue",
+												variant: "outline",
+												size: "sm",
+												disabled: (state.answer ?? "").length === 0,
+												onClick: submit
+											},
+											t("action.continue")
+										)
+									])
+						]
+					: [h(Button, { key: "close", variant: "outline", size: "sm", onClick: finish }, t("action.close"))];
 
 			return h(
 				Fragment,
@@ -229,32 +325,33 @@ window.__ModuleLoader__.load({
 				h(
 					"span",
 					{ ref: measure, style: { display: "inline-flex" } },
-					h(Button, { variant: "outline", size: "sm", onClick: () => void start() }, t("short"))
+					h(Button, { variant: "outline", size: "sm", onClick: () => void start() }, t("button.signIn"))
 				),
 				h(
 					Modal,
 					{
 						open: state.phase !== "idle",
 						onClose: closable ? finish : cancel,
-						title: t("button"),
-						closeLabel: t("close"),
+						title: t("button.title"),
+						closeLabel: t("action.close"),
 						footer: footer
 					},
 					h("p", { style: messageStyle, role: "status" }, noticeText),
-					url === undefined
+					url === undefined ? null : h("a", { href: url, target: "_blank", rel: "noopener noreferrer", style: linkStyle }, t("action.open")),
+					detail === undefined
 						? null
 						: h(
-								"a",
-								{ href: url, target: "_blank", rel: "noopener noreferrer", style: linkStyle },
-								t("open")
+								"div",
+								{ style: { display: "grid", gap: 4 } },
+								h("span", { style: fieldLabelStyle }, t("error.detail")),
+								h("pre", { style: detailStyle }, detail)
 							),
-					state.phase === "failed" ? h("p", { role: "alert", style: errorStyle }, text(state.message, t("failed"))) : null,
 					prompt === undefined
 						? null
 						: h(
 								"div",
 								{ style: { display: "grid", gap: 8, marginTop: 4 } },
-								h("span", { style: fieldLabelStyle }, text(prompt.prompt?.message, t("continue"))),
+								h("span", { style: fieldLabelStyle }, promptLabel(t, prompt)),
 								selecting
 									? h(
 											"select",
@@ -263,8 +360,8 @@ window.__ModuleLoader__.load({
 												onChange: (event) => setState((current) => ({ ...current, answer: event.target.value })),
 												style: inputStyle
 											},
-											h("option", { value: "", disabled: true }, t("choose")),
-											...options.map((option) => h("option", { key: option.id, value: option.id }, option.label))
+											h("option", { value: "", disabled: true }, t("prompt.choose")),
+											...options.map((option) => h("option", { key: option.id, value: option.id }, optionLabel(t, option)))
 										)
 									: h("input", {
 											type: prompt.prompt?.kind === "secret" ? "password" : "text",
@@ -300,7 +397,20 @@ window.__ModuleLoader__.load({
 			lineHeight: "22px"
 		};
 		const messageStyle = { margin: 0, fontSize: 14, lineHeight: "22px", whiteSpace: "pre-wrap", overflowWrap: "anywhere" };
-		const errorStyle = { ...messageStyle, color: "var(--dsw-alias-state-error-primary, #d33)" };
+		const detailStyle = {
+			margin: 0,
+			padding: "8px 10px",
+			maxHeight: 120,
+			overflow: "auto",
+			borderRadius: "var(--dsw-radius-md, 8px)",
+			background: "var(--dsw-alias-bg-module-platform, #f5f5f5)",
+			color: "var(--dsw-alias-label-tertiary, #666)",
+			fontFamily: "var(--ds-font-family-code, monospace)",
+			fontSize: 12,
+			lineHeight: "18px",
+			whiteSpace: "pre-wrap",
+			wordBreak: "break-word"
+		};
 		const linkStyle = {
 			color: "var(--dsw-alias-state-business-primary, #2563eb)",
 			fontSize: 14,
@@ -332,7 +442,11 @@ window.__ModuleLoader__.load({
 					await mounted;
 					namespace = namespaceOf();
 				}
-				if (namespace === undefined) throw new Error("the openaiCodexOAuth Remote namespace did not mount");
+				if (namespace === undefined) {
+					const error = new Error("the openaiCodexOAuth Remote namespace did not mount");
+					error.code = "namespace";
+					throw error;
+				}
 				return namespace.remoteBegin(signal);
 			};
 			// Provider-card extras are keyed by the row's settings namespace; every
